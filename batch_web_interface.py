@@ -1,8 +1,40 @@
 import streamlit as st
 import pandas as pd
-import requests
 import matplotlib.pyplot as plt
+from transformers import RobertaTokenizer, RobertaForSequenceClassification
+import torch
 
+# Page config
+st.set_page_config(
+    page_title="Batch Sentiment Analysis",
+    page_icon="📊",
+    layout="wide"
+)
+
+@st.cache_resource
+def load_model():
+    """Load the model and tokenizer"""
+    tokenizer = RobertaTokenizer.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment')
+    model = RobertaForSequenceClassification.from_pretrained('cardiffnlp/twitter-roberta-base-sentiment')
+    return tokenizer, model
+
+# Load model and tokenizer
+tokenizer, model = load_model()
+
+def predict_batch_sentiment(texts):
+    """Predict sentiment for a batch of texts"""
+    results = []
+    for text in texts:
+        inputs = tokenizer(text, return_tensors='pt', truncation=True, padding=True, max_length=512)
+        with torch.no_grad():
+            outputs = model(**inputs)
+        logits = outputs.logits
+        predicted_class = torch.argmax(logits, dim=1).item()
+        sentiment_map = {0: "negative", 1: "neutral", 2: "positive"}
+        results.append({"text": text, "sentiment": sentiment_map[predicted_class]})
+    return results
+
+# UI elements
 st.title("Batch Sentiment Analysis for Customer Feedback")
 st.markdown("Upload customer feedback for your product and analyze the sentiment distribution.")
 
@@ -20,53 +52,59 @@ if uploaded_file is not None:
         st.write("Uploaded Dataset:")
         st.dataframe(df.head())
 
-        # Send comments to the backend for sentiment analysis
+        # Analyze sentiments
         if st.button("Analyze Sentiments"):
-            comments = df["comments"].tolist()
-            try:
-                # Send data to the new FastAPI for analysis
-                response = requests.post(
-                    "http://127.0.0.1:8001/predict_batch",
-                    json={"texts": comments}
-                )
-                if response.status_code == 200:
-                    # Process API results
-                    results = response.json()["results"]
+            with st.spinner('Analyzing sentiments...'):
+                comments = df["comments"].tolist()
+                try:
+                    # Process comments
+                    results = predict_batch_sentiment(comments)
                     sentiments = [result["sentiment"] for result in results]
 
                     # Add sentiments to DataFrame
                     df["Sentiment"] = sentiments
-                    st.write("Analysis Results:")
-                    st.dataframe(df)
+                    
+                    # Create tabs for different views
+                    tab1, tab2 = st.tabs(["Results", "Distribution"])
+                    
+                    with tab1:
+                        st.write("Analysis Results:")
+                        st.dataframe(df)
+                        
+                        # Option to download results
+                        st.download_button(
+                            label="Download Results",
+                            data=df.to_csv(index=False),
+                            file_name="sentiment_analysis_results.csv",
+                            mime="text/csv"
+                        )
 
-                    # Calculate sentiment percentages
-                    sentiment_counts = df["Sentiment"].value_counts(normalize=True) * 100
-                    sentiment_counts = sentiment_counts.to_dict()
+                    with tab2:
+                        # Calculate sentiment percentages
+                        sentiment_counts = df["Sentiment"].value_counts(normalize=True) * 100
+                        sentiment_counts = sentiment_counts.to_dict()
 
-                    # Display sentiment percentages
-                    st.write("Sentiment Distribution (%):")
-                    for sentiment, percentage in sentiment_counts.items():
-                        st.write(f"{sentiment.capitalize()}: {percentage:.2f}%")
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # Display sentiment percentages
+                            st.write("Sentiment Distribution (%):")
+                            for sentiment, percentage in sentiment_counts.items():
+                                st.write(f"{sentiment.capitalize()}: {percentage:.2f}%")
 
-                    # Plot sentiment distribution
-                    fig, ax = plt.subplots()
-                    ax.pie(
-                        sentiment_counts.values(),
-                        labels=sentiment_counts.keys(),
-                        autopct="%1.1f%%",
-                        startangle=90
-                    )
-                    ax.axis("equal")  # Equal aspect ratio for pie chart
-                    st.pyplot(fig)
+                        with col2:
+                            # Plot sentiment distribution
+                            fig, ax = plt.subplots()
+                            colors = ['#ff9999', '#66b3ff', '#99ff99']
+                            ax.pie(
+                                sentiment_counts.values(),
+                                labels=sentiment_counts.keys(),
+                                autopct="%1.1f%%",
+                                startangle=90,
+                                colors=colors
+                            )
+                            ax.axis("equal")
+                            st.pyplot(fig)
 
-                    # Option to download results
-                    st.download_button(
-                        label="Download Results",
-                        data=df.to_csv(index=False),
-                        file_name="sentiment_analysis_results.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.error("Error in API response.")
-            except Exception as e:
-                st.error(f"Connection error: {e}")
+                except Exception as e:
+                    st.error(f"Error during analysis: {e}")
