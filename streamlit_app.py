@@ -1,21 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from transformers import pipeline
-
-# Initialize sentiment analyzer
-@st.cache_resource
-def load_model():
-    """Load the sentiment analysis model"""
-    try:
-        return pipeline(
-            "sentiment-analysis",
-            model="cardiffnlp/twitter-roberta-base-sentiment",
-            top_k=None
-        )
-    except Exception as e:
-        st.error(f"Error loading model: {str(e)}")
-        return None
+from textblob import TextBlob
 
 # Page configuration
 st.set_page_config(page_title="Customer Feedback Analysis", layout="wide")
@@ -24,13 +10,23 @@ st.set_page_config(page_title="Customer Feedback Analysis", layout="wide")
 st.title("Customer Feedback Analysis")
 st.markdown("Upload your customer feedback CSV file to analyze sentiments.")
 
-# Load model
-with st.spinner('Loading RoBERTa sentiment analysis model...'):
-    sentiment_analyzer = load_model()
-
-if sentiment_analyzer is None:
-    st.error("Failed to load the sentiment analysis model. Please try again later.")
-    st.stop()
+def analyze_sentiment(text):
+    """Analyze sentiment of text using TextBlob"""
+    try:
+        # Create TextBlob object
+        blob = TextBlob(str(text))
+        # Get sentiment polarity (-1 to 1)
+        polarity = blob.sentiment.polarity
+        
+        # Classify sentiment
+        if polarity > 0.1:
+            return 'positive', polarity
+        elif polarity < -0.1:
+            return 'negative', polarity
+        else:
+            return 'neutral', polarity
+    except:
+        return 'neutral', 0.0
 
 # File upload
 uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
@@ -52,37 +48,27 @@ if uploaded_file is not None:
 
         if st.button("Analyze Sentiments"):
             with st.spinner('Analyzing sentiments...'):
-                # Process feedback in batches
-                batch_size = 32
-                sentiments = []
-                confidence_scores = []
-                
+                # Process feedback
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
-                # Process in batches to avoid memory issues
-                for i in range(0, len(df), batch_size):
-                    batch = df[text_column][i:i+batch_size].tolist()
-                    results = sentiment_analyzer(batch)
-                    
-                    for result in results:
-                        label_scores = {item['label']: item['score'] for item in result}
-                        
-                        # Get the sentiment with highest confidence
-                        sentiment = max(label_scores.items(), key=lambda x: x[1])[0]
-                        confidence = label_scores[sentiment]
-                        
-                        sentiments.append(sentiment)
-                        confidence_scores.append(confidence)
+                sentiments = []
+                polarity_scores = []
+                
+                # Process each text
+                for idx, text in enumerate(df[text_column]):
+                    sentiment, polarity = analyze_sentiment(text)
+                    sentiments.append(sentiment)
+                    polarity_scores.append(polarity)
                     
                     # Update progress
-                    progress = (i + batch_size) / len(df)
-                    progress_bar.progress(min(progress, 1.0))
-                    status_text.text(f'Processed {min(i + batch_size, len(df))} of {len(df)} entries')
+                    progress = (idx + 1) / len(df)
+                    progress_bar.progress(progress)
+                    status_text.text(f'Processed {idx + 1} of {len(df)} entries')
 
                 # Add results to dataframe
                 df['Sentiment'] = sentiments
-                df['Confidence'] = confidence_scores
+                df['Sentiment_Score'] = polarity_scores
                 
                 # Clear progress indicators
                 progress_bar.empty()
@@ -106,12 +92,12 @@ if uploaded_file is not None:
                     st.plotly_chart(fig1, use_container_width=True)
 
                 with col2:
-                    # Confidence scores by sentiment
-                    fig2 = px.box(
+                    # Score distribution histogram
+                    fig2 = px.histogram(
                         df,
-                        x='Sentiment',
-                        y='Confidence',
-                        title='Confidence Scores by Sentiment'
+                        x='Sentiment_Score',
+                        title='Sentiment Score Distribution',
+                        nbins=20
                     )
                     st.plotly_chart(fig2, use_container_width=True)
 
@@ -154,13 +140,13 @@ st.markdown("""
 5. View the results and download the analysis
 """)
 
-# Add information about the model
+# Add information about the analysis
 st.sidebar.markdown("""
 ### About the Analysis
-This app uses the RoBERTa model fine-tuned on Twitter data for sentiment analysis. The model classifies text into:
-- Positive: Indicates positive sentiment
-- Neutral: Indicates neutral sentiment
-- Negative: Indicates negative sentiment
-
-The confidence score shows how certain the model is about its prediction.
+This app uses TextBlob for sentiment analysis. The analysis provides:
+- Sentiment (Positive/Neutral/Negative)
+- Sentiment Score (-1 to +1)
+  - Positive scores indicate positive sentiment
+  - Negative scores indicate negative sentiment
+  - Scores near zero indicate neutral sentiment
 """)
