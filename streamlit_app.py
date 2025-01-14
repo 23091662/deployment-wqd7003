@@ -1,20 +1,12 @@
 import streamlit as st
-import pandas as pd
-import matplotlib.pyplot as plt
 
-# Page config
-st.set_page_config(page_title="Sentiment Analysis App", layout="wide")
-st.title("Batch Sentiment Analysis for Customer Feedback")
-st.markdown("Upload customer feedback for your product and analyze the sentiment distribution.")
+# Basic app configuration
+st.set_page_config(page_title="Test App")
 
-# Simple test to ensure the app runs
-st.write("App is running successfully!")
+# Simple header
+st.title("Simple Test App")
+st.write("Hello! This is a test app.")
 
-# File uploader
-uploaded_file = st.file_uploader("Upload a CSV file", type=["csv"])
-
-if uploaded_file is not None:
-    # Read the uploaded file
-    df = pd.read_csv(uploaded_file)
-    st.write("Uploaded Dataset:")
-    st.dataframe(df.head())
+# Add a simple interactive element
+if st.button("Click me!"):
+    st.write("Button clicked!")
