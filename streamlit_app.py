@@ -1,28 +1,31 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
-from transformers import pipeline
 import plotly.express as px
+from transformers import pipeline
 
 # Initialize sentiment analyzer
 @st.cache_resource
 def load_model():
     """Load the sentiment analysis model"""
     try:
-        return pipeline("sentiment-analysis", model="distilbert-base-uncased-finetuned-sst-2-english")
+        return pipeline(
+            "sentiment-analysis",
+            model="cardiffnlp/twitter-roberta-base-sentiment",
+            top_k=None
+        )
     except Exception as e:
         st.error(f"Error loading model: {str(e)}")
         return None
 
 # Page configuration
-st.set_page_config(page_title="Sentiment Analysis App", layout="wide")
+st.set_page_config(page_title="Customer Feedback Analysis", layout="wide")
 
 # Header
 st.title("Customer Feedback Analysis")
 st.markdown("Upload your customer feedback CSV file to analyze sentiments.")
 
 # Load model
-with st.spinner('Loading sentiment analysis model...'):
+with st.spinner('Loading RoBERTa sentiment analysis model...'):
     sentiment_analyzer = load_model()
 
 if sentiment_analyzer is None:
@@ -49,21 +52,28 @@ if uploaded_file is not None:
 
         if st.button("Analyze Sentiments"):
             with st.spinner('Analyzing sentiments...'):
-                # Process feedback in batches to avoid memory issues
+                # Process feedback in batches
                 batch_size = 32
                 sentiments = []
-                scores = []
+                confidence_scores = []
                 
                 progress_bar = st.progress(0)
                 status_text = st.empty()
                 
+                # Process in batches to avoid memory issues
                 for i in range(0, len(df), batch_size):
                     batch = df[text_column][i:i+batch_size].tolist()
                     results = sentiment_analyzer(batch)
                     
                     for result in results:
-                        sentiments.append(result['label'])
-                        scores.append(result['score'])
+                        label_scores = {item['label']: item['score'] for item in result}
+                        
+                        # Get the sentiment with highest confidence
+                        sentiment = max(label_scores.items(), key=lambda x: x[1])[0]
+                        confidence = label_scores[sentiment]
+                        
+                        sentiments.append(sentiment)
+                        confidence_scores.append(confidence)
                     
                     # Update progress
                     progress = (i + batch_size) / len(df)
@@ -72,7 +82,7 @@ if uploaded_file is not None:
 
                 # Add results to dataframe
                 df['Sentiment'] = sentiments
-                df['Confidence'] = scores
+                df['Confidence'] = confidence_scores
                 
                 # Clear progress indicators
                 progress_bar.empty()
@@ -93,19 +103,35 @@ if uploaded_file is not None:
                         names=sentiment_counts.index,
                         title='Sentiment Distribution'
                     )
-                    st.plotly_chart(fig1)
+                    st.plotly_chart(fig1, use_container_width=True)
 
                 with col2:
-                    # Confidence distribution histogram
-                    fig2 = px.histogram(
+                    # Confidence scores by sentiment
+                    fig2 = px.box(
                         df,
-                        x='Confidence',
-                        title='Confidence Score Distribution',
-                        nbins=20
+                        x='Sentiment',
+                        y='Confidence',
+                        title='Confidence Scores by Sentiment'
                     )
-                    st.plotly_chart(fig2)
+                    st.plotly_chart(fig2, use_container_width=True)
 
-                # Download button for results
+                # Summary statistics
+                st.subheader("Summary Statistics")
+                col3, col4, col5 = st.columns(3)
+                
+                with col3:
+                    positive_pct = (df['Sentiment'] == 'positive').mean() * 100
+                    st.metric("Positive Feedback", f"{positive_pct:.1f}%")
+                
+                with col4:
+                    neutral_pct = (df['Sentiment'] == 'neutral').mean() * 100
+                    st.metric("Neutral Feedback", f"{neutral_pct:.1f}%")
+                
+                with col5:
+                    negative_pct = (df['Sentiment'] == 'negative').mean() * 100
+                    st.metric("Negative Feedback", f"{negative_pct:.1f}%")
+
+                # Download results
                 csv = df.to_csv(index=False)
                 st.download_button(
                     label="Download Results",
@@ -131,9 +157,10 @@ st.markdown("""
 # Add information about the model
 st.sidebar.markdown("""
 ### About the Analysis
-This app uses DistilBERT model fine-tuned for sentiment analysis. The sentiments are classified as:
-- POSITIVE: Positive feedback
-- NEGATIVE: Negative feedback
+This app uses the RoBERTa model fine-tuned on Twitter data for sentiment analysis. The model classifies text into:
+- Positive: Indicates positive sentiment
+- Neutral: Indicates neutral sentiment
+- Negative: Indicates negative sentiment
 
-The confidence score indicates how certain the model is about its prediction.
+The confidence score shows how certain the model is about its prediction.
 """)
